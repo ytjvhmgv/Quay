@@ -103,13 +103,24 @@ async function readError(response) {
   throw new UpstreamError(response.status, detail.slice(0, 2000));
 }
 
-export async function completeChat({ baseUrl, apiKey, model, messages, tools, signal, onDelta }) {
+export async function completeChat({ baseUrl, apiKey, model, messages, tools, signal, onDelta, reasoningEffort }) {
   if (!apiKey) throw new Error("还没有配置 SUB2API_API_KEY");
   if (!model) throw new Error("还没有选择模型");
   const url = chatCompletionsUrl(baseUrl);
   const body = { model, messages };
   const maxTokens = Number(process.env.SUB2API_MAX_TOKENS || "");
   if (Number.isFinite(maxTokens) && maxTokens > 0) body.max_tokens = maxTokens;
+  // reasoning effort — different models use different parameter names
+  if (reasoningEffort && reasoningEffort !== "default") {
+    // Claude / Anthropic style: thinking
+    if (/claude|anthropic/i.test(model)) {
+      const budgetMap = { low: 1024, medium: 8192, high: 16000, max: 32000 };
+      body.thinking = { type: "enabled", budget_tokens: budgetMap[reasoningEffort] || 8192 };
+    } else {
+      // OpenAI / most others: reasoning_effort
+      body.reasoning_effort = reasoningEffort;
+    }
+  }
   if (tools?.length) {
     body.tools = tools;
     body.tool_choice = "auto";
