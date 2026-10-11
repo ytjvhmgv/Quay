@@ -573,6 +573,7 @@ async function sendMessage(text) {
         content: userText,
         model: ($("#composer-model")?.value || $("#model-input").value || "").trim(),
         reasoningEffort: $("#composer-effort")?.value || "default",
+        contextWindow: state.status?.contextWindow || 0,
         activeFile: state.file?.path || "",
       }),
       signal: ctrl.signal,
@@ -709,6 +710,11 @@ function settingsForm(values) {
         <label>自定义模型列表（每行一个，会和接口返回的合并）</label>
         <textarea name="extraModels" rows="4" placeholder="gpt-4o&#10;claude-opus-4-5&#10;gemini-pro">${escapeHtml((v.extraModels || []).join("\n"))}</textarea>
       </div>
+      <div class="field" style="margin-top:10px">
+        <label>上下文窗口大小（tokens，0 = 自动 60k chars）</label>
+        <input name="contextWindow" type="number" min="0" step="1000" value="${v.contextWindow || 0}" placeholder="如 1000000 表示 1M" />
+        <p class="hint-text">填写模型实际支持的上下文 token 数。工具返回内容和文件读取分块大小会按此比例放大（约 3 字符/token）。0 表示使用默认值（60K 字符）。</p>
+      </div>
     </div>
 
     <div class="settings-section">
@@ -731,6 +737,7 @@ function readSettingsForm() {
   data.clearAppPassword = Boolean(body.querySelector('[name="clearAppPassword"]')?.checked);
   const extraRaw = body.querySelector('[name="extraModels"]')?.value ?? "";
   data.extraModels = extraRaw.split("\n").map(m => m.trim()).filter(Boolean);
+  data.contextWindow = Number(body.querySelector('[name="contextWindow"]')?.value || 0) || 0;
   return data;
 }
 
