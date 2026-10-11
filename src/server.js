@@ -176,17 +176,21 @@ app.post("/api/settings/test", wrap(async (req, res) => {
 
 app.get("/api/models", wrap(async (_req, res) => {
   const settings = getSettings();
-  if (!settings.sub2apiBaseUrl || !settings.sub2apiApiKey) return res.json({ models: [] });
+  const extra = settings.extraModels || [];
+  if (!settings.sub2apiBaseUrl || !settings.sub2apiApiKey) return res.json({ models: extra });
   try {
     const response = await fetch(modelsUrl(settings.sub2apiBaseUrl), {
       headers: { Authorization: `Bearer ${settings.sub2apiApiKey}` },
     });
-    if (!response.ok) return res.json({ models: [], warning: (await response.text()).slice(0, 300) });
+    if (!response.ok) return res.json({ models: extra, warning: (await response.text()).slice(0, 300) });
     const json = await response.json();
-    const models = (json.data || []).map((item) => item.id).filter(Boolean);
-    res.json({ models });
+    const remote = (json.data || []).map((item) => item.id).filter(Boolean);
+    // merge: extra first (user-pinned), then remote ones not already listed
+    const seen = new Set(extra);
+    const merged = [...extra, ...remote.filter((m) => !seen.has(m))];
+    res.json({ models: merged });
   } catch (error) {
-    res.json({ models: [], warning: error.message });
+    res.json({ models: extra, warning: error.message });
   }
 }));
 
