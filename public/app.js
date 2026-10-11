@@ -230,11 +230,30 @@ async function loadModels() {
   const data = await api("/api/models");
   const list = $("#model-list");
   list.innerHTML = "";
+  // build merged deduplicated list (extraModels already merged server-side)
+  const seen = new Set();
   for (const id of data.models || []) {
+    if (seen.has(id)) continue;
+    seen.add(id);
     const option = document.createElement("option");
     option.value = id;
     list.append(option);
   }
+  // update model switcher dropdown in topbar if it exists
+  const sw = $("#model-switcher");
+  if (sw) {
+    const prev = sw.value;
+    sw.innerHTML = "";
+    for (const id of data.models || []) {
+      const opt = document.createElement("option");
+      opt.value = id;
+      opt.textContent = id;
+      if (id === prev || id === (state.status?.model)) opt.selected = true;
+      sw.append(opt);
+    }
+    if (!sw.value && data.models?.length) sw.value = data.models[0];
+  }
+  return data.models || [];
 }
 
 async function loadProjects() {
@@ -669,6 +688,10 @@ function settingsForm(values) {
         <div class="field"><label>默认模型</label><input name="sub2apiModel" value="${escapeHtml(v.sub2apiModel || "")}" list="model-list" placeholder="模型名称" /></div>
       </div>
       <div class="test-row"><button type="button" class="btn-ghost btn-sm" data-test="model">测试模型接口</button><span class="test-result" data-for="model"></span></div>
+      <div class="field" style="margin-top:12px">
+        <label>自定义模型列表（每行一个，会和接口返回的合并）</label>
+        <textarea name="extraModels" rows="4" placeholder="gpt-4o&#10;claude-opus-4-5&#10;gemini-pro">${escapeHtml((v.extraModels || []).join("\n"))}</textarea>
+      </div>
     </div>
 
     <div class="settings-section">
@@ -689,6 +712,8 @@ function readSettingsForm() {
   }
   data.r2ForcePathStyle = Boolean(body.querySelector('[name="r2ForcePathStyle"]')?.checked);
   data.clearAppPassword = Boolean(body.querySelector('[name="clearAppPassword"]')?.checked);
+  const extraRaw = body.querySelector('[name="extraModels"]')?.value ?? "";
+  data.extraModels = extraRaw.split("\n").map(m => m.trim()).filter(Boolean);
   return data;
 }
 
