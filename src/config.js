@@ -32,6 +32,7 @@ function envSettings() {
     sub2apiBaseUrl: (process.env.SUB2API_BASE_URL || "").trim().replace(/\/+$/, ""),
     sub2apiApiKey: process.env.SUB2API_API_KEY || "",
     sub2apiModel: process.env.SUB2API_MODEL || "",
+    extraModels: (process.env.EXTRA_MODELS || "").split(",").map(m => m.trim()).filter(Boolean),
   };
 }
 
@@ -52,6 +53,7 @@ export function getSettings() {
       merged.r2ForcePathStyle = value;
       continue;
     }
+    if (key === "extraModels" && Array.isArray(value)) { merged.extraModels = value; continue; }
     if (typeof value === "string" && value.length) merged[key] = value;
   }
   if (!nonempty(file.r2Endpoint)) {
@@ -90,6 +92,7 @@ export function publicSettings() {
     sub2apiBaseUrl: settings.sub2apiBaseUrl,
     sub2apiApiKey: maskSecret(settings.sub2apiApiKey),
     sub2apiModel: settings.sub2apiModel,
+    extraModels: settings.extraModels || [],
     r2Ready: r2Ready(settings),
     modelReady: modelReady(settings),
     hasOverrides: fs.existsSync(settingsPath),
@@ -135,6 +138,12 @@ export function saveSettings(input) {
     "sub2apiApiKey",
     "sub2apiModel",
   ];
+  // extraModels saved separately as array
+  if (Object.prototype.hasOwnProperty.call(input || {}, "extraModels")) {
+    const raw = input.extraModels;
+    if (Array.isArray(raw)) next.extraModels = raw.filter(m => typeof m === "string" && m.trim()).map(m => m.trim());
+    else if (typeof raw === "string") next.extraModels = raw.split(",").map(m => m.trim()).filter(Boolean);
+  }
   for (const key of fields) {
     if (!Object.prototype.hasOwnProperty.call(input || {}, key)) continue;
     const raw = String(input[key] ?? "").trim();
