@@ -32,6 +32,7 @@ function envSettings() {
     sub2apiBaseUrl: (process.env.SUB2API_BASE_URL || "").trim().replace(/\/+$/, ""),
     sub2apiApiKey: process.env.SUB2API_API_KEY || "",
     sub2apiModel: process.env.SUB2API_MODEL || "",
+    contextWindow: Number(process.env.CONTEXT_WINDOW || 0) || 0,
     extraModels: (process.env.EXTRA_MODELS || "").split(",").map(m => m.trim()).filter(Boolean),
   };
 }
@@ -54,6 +55,7 @@ export function getSettings() {
       continue;
     }
     if (key === "extraModels" && Array.isArray(value)) { merged.extraModels = value; continue; }
+    if (key === "contextWindow" && typeof value === "number") { merged.contextWindow = value; continue; }
     if (typeof value === "string" && value.length) merged[key] = value;
   }
   if (!nonempty(file.r2Endpoint)) {
@@ -93,6 +95,7 @@ export function publicSettings() {
     sub2apiApiKey: maskSecret(settings.sub2apiApiKey),
     sub2apiModel: settings.sub2apiModel,
     extraModels: settings.extraModels || [],
+    contextWindow: settings.contextWindow || 0,
     r2Ready: r2Ready(settings),
     modelReady: modelReady(settings),
     hasOverrides: fs.existsSync(settingsPath),
@@ -138,6 +141,11 @@ export function saveSettings(input) {
     "sub2apiApiKey",
     "sub2apiModel",
   ];
+  // contextWindow saved separately as number
+  if (Object.prototype.hasOwnProperty.call(input || {}, "contextWindow")) {
+    const cw = Number(input.contextWindow);
+    if (Number.isFinite(cw) && cw >= 0) next.contextWindow = cw;
+  }
   // extraModels saved separately as array
   if (Object.prototype.hasOwnProperty.call(input || {}, "extraModels")) {
     const raw = input.extraModels;
