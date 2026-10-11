@@ -669,10 +669,15 @@ async function sendMessage(text) {
       if (state.file && !state.dirty) await openFile(state.file.path);
     }
   } catch (error) {
-    if (error.name === "AbortError") toast("已停止");
+    const message = error.name === "AbortError"
+      ? "已停止"
+      : (/network|failed to fetch|networkerror/i.test(error.message || "")
+        ? "连接中断。高推理强度下模型可能想太久，服务端或网关把请求掐断了。可以改成「中」或「低」再试。"
+        : (error.message || "发送失败"));
+    if (error.name === "AbortError") toast(message);
     else {
-      live.append(Object.assign(document.createElement("div"), { className: "form-error", textContent: error.message }));
-      toast(error.message);
+      live.append(Object.assign(document.createElement("div"), { className: "form-error", textContent: message }));
+      toast(message);
     }
   } finally {
     state.sending = false;
