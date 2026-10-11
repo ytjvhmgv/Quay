@@ -441,11 +441,11 @@ async function readFileTool(store, projectId, args, progress) {
   progress(`读取 ${rel}…`);
   const got = await store.getBuffer(objectKey(projectId, rel));
   if (!got) throw new Error(`找不到文件：${rel}`);
-  if (got.buffer.length > 1_500_000) throw new Error(`文件太大，不能整份读：${rel}`);
+  if (got.buffer.length > 3_000_000) throw new Error(`文件超过 3MB，不能读：${rel}`);
   if (isProbablyBinary(rel, got.buffer)) throw new Error(`这是二进制文件，不能当文本读：${rel}（${got.buffer.length} 字节）`);
   const lines = got.buffer.toString("utf8").split("\n");
   const offset = Math.max(1, Number(args.offset || 1));
-  const limit = Math.min(800, Math.max(1, Number(args.limit || 400)));
+  const limit = Math.min(4000, Math.max(1, Number(args.limit || 800)));
   if (offset > lines.length) return `文件 ${rel} 一共 ${lines.length} 行，offset ${offset} 已经超出末尾`;
   const end = Math.min(lines.length, offset - 1 + limit);
   const slice = lines.slice(offset - 1, end).join("\n");
@@ -598,12 +598,44 @@ async function readFileFullTool(store, projectId, args, progress) {
   progress(`完整读取 ${rel}…`);
   const got = await store.getBuffer(objectKey(projectId, rel));
   if (!got) throw new Error(`找不到文件：${rel}`);
-  const MAX = 150_000;
-  if (got.buffer.length > MAX) throw new Error(`文件太大（${got.buffer.length} 字节），超过 150KB 限制。请用 read_file 分段读取，或用 outline 先看结构。`);
+  if (got.buffer.length > 600_000) throw new Error(`文件超过 600KB（${got.buffer.length} 字节），请用 outline 看结构 + read_file 分段精读。`);
   if (isProbablyBinary(rel, got.buffer)) throw new Error(`这是二进制文件：${rel}`);
   const text = got.buffer.toString("utf8");
   const lines = text.split("\n");
-  return `文件 ${rel} 完整内容（共 ${lines.length} 行，${got.buffer.length} 字节）\n\n${text}`;
+  const totalLines = lines.length;
+  const totalBytes = got.buffer.length;
+  // chunk by lines so each chunk fits safely in model context
+  // ~40000 chars per chunk to stay well under typical context limits
+  const ctxTokens = Number(process.env._AGENT_CTX_TOKENS || 0);
+  const CHUNK_CHARS = ctxTokens > 0 ? Math.min(ctxTokens * 3, 4_000_000) : 120_000;
+  if (text.length <= CHUNK_CHARS) {
+    return `文件 ${rel} 完整内容（共 ${totalLines} 行，${totalBytes} 字节）\n\n${text}`;
+  }
+  // split into chunks
+  const chunks = [];
+  let cur = "";
+  let chunkStart = 1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] + "\n";
+    if (cur.length + line.length > CHUNK_CHARS && cur.length > 0) {
+      chunks.push({ start: chunkStart, end: i, text: cur });
+      chunkStart = i + 1;
+      cur = "";
+    }
+    cur += line;
+  }
+  if (cur) chunks.push({ start: chunkStart, end: lines.length, text: cur });
+  // return first chunk with instructions to read remaining
+  const first = chunks[0];
+  const remaining = chunks.slice(1).map(c => `read_file("${rel}", offset=${c.start}, limit=${c.end - c.start + 1})`).join("\n");
+  return `文件 ${rel}（共 ${totalLines} 行，${totalBytes} 字节，分 ${chunks.length} 块）
+
+⚠️ 文件较大，以下是第 1/${chunks.length} 块（第 ${first.start}-${first.end} 行）。
+必须继续调用 read_file 读完剩余块，才能得出完整结论：
+${remaining}
+
+--- 第 1 块内容开始 ---
+${first.text}--- 第 1 块内容结束 ---`;
 }
 
 async function grepTool(store, projectId, args, progress) {
