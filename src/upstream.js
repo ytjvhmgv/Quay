@@ -144,10 +144,11 @@ async function sendChat(url, apiKey, body, signal, onDelta) {
     if (signal.aborted) ctrl.abort();
     else signal.addEventListener("abort", onAbort, { once: true });
   }
+  const timeoutMs = Math.min(900000, Math.max(30000, Number(process.env.SUB2API_TIMEOUT_MS || 420000)));
   const timer = setTimeout(() => {
     timedOut = true;
     ctrl.abort();
-  }, 180000);
+  }, timeoutMs);
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -171,7 +172,7 @@ async function sendChat(url, apiKey, body, signal, onDelta) {
       aborted.aborted = true;
       throw aborted;
     }
-    if (timedOut) throw new Error("模型响应超时");
+    if (timedOut) throw new Error(`模型响应超时（${Math.round(timeoutMs / 1000)} 秒）。高推理强度会想更久，可以改成中或低再试。`);
     if (error instanceof UpstreamError) throw error;
     if (error?.name === "AbortError") throw new Error("模型请求已中断");
     throw new Error(`无法连接 sub2api：${error.message || error}`);
