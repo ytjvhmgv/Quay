@@ -1,0 +1,16 @@
+services:
+  quay:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATA_DIR: /data
+    volumes:
+      - quay-data:/data
+    restart: unless-stopped
+
+volumes:
+  quay-data:
