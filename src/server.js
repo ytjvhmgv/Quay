@@ -412,10 +412,13 @@ app.post("/api/projects/:id/chats/:chatId/messages", wrap(async (req, res) => {
   }
   const model = String(req.body?.model || chat.model || settings.sub2apiModel || "").trim();
   const reasoningEffort = String(req.body?.reasoningEffort || "").trim();
+  const contextWindow = Number(req.body?.contextWindow || settings.contextWindow || 0) || 0;
   if (!model) throw fail("还没有选择模型");
   if (!settings.sub2apiBaseUrl || !settings.sub2apiApiKey) throw fail("先配置 sub2api 地址和密钥");
 
   running.add(lock);
+  if (contextWindow > 0) process.env._AGENT_CTX_TOKENS = String(contextWindow);
+  else delete process.env._AGENT_CTX_TOKENS;
   const now = new Date().toISOString();
   chat.messages = chat.messages || [];
   chat.openaiMessages = chat.openaiMessages || [];
@@ -460,6 +463,7 @@ app.post("/api/projects/:id/chats/:chatId/messages", wrap(async (req, res) => {
       emit: send,
       activeFile,
       reasoningEffort,
+      contextWindow,
     });
     await saveAssistant(result.segments, result.openaiMessages);
     const changed = result.segments.some((seg) => seg.type === "tool" && seg.ok && MUTATING_TOOLS.has(seg.name));
