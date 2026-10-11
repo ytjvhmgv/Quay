@@ -64,7 +64,11 @@ function trimTranscript(messages) {
   return messages.slice(start);
 }
 
-export async function runAgent({ settings, store, project, chat, model, signal, emit, activeFile, reasoningEffort }) {
+export async function runAgent({ settings, store, project, chat, model, signal, emit, activeFile, reasoningEffort, contextWindow }) {
+  // context window: 0 = auto (60k chars), or user-specified tokens * ~3 chars/token
+  const ctxTokens = Number(contextWindow || settings.contextWindow || 0);
+  const toolClipChars = ctxTokens > 0 ? Math.min(ctxTokens * 3, 2_000_000) : 60_000;
+  const toolClipDisplay = ctxTokens > 0 ? Math.min(ctxTokens * 3, 8_000) : 4_000;
   const openaiMessages = Array.isArray(chat.openaiMessages) ? chat.openaiMessages.slice() : [];
   const segments = [];
   let textBuf = "";
@@ -73,7 +77,7 @@ export async function runAgent({ settings, store, project, chat, model, signal, 
     segments.push({ type: "text", text: textBuf });
     textBuf = "";
   };
-  const maxRounds = Math.min(32, Math.max(1, Number(process.env.AGENT_MAX_ROUNDS || 16)));
+  const maxRounds = Math.min(64, Math.max(1, Number(process.env.AGENT_MAX_ROUNDS || 24)));
   let usedToolRound = false;
 
   for (let round = 0; round < maxRounds; round += 1) {
@@ -157,11 +161,11 @@ export async function runAgent({ settings, store, project, chat, model, signal, 
         if (parseError) throw new Error(parseError);
         if (!call.function.name) throw new Error("缺少工具名");
         const output = await executeTool(store, project.id, call.function.name, args, onProgress);
-        seg.result = clip(output, 2000);
-        openaiMessages.push({ role: "tool", tool_call_id: call.id, content: clip(output, 12000) });
+        seg.result = clip(output, toolClipDisplay);
+        openaiMessages.push({ role: "tool", tool_call_id: call.id, content: clip(output, toolClipChars) });
       } catch (error) {
         seg.ok = false;
-        seg.result = clip(error.message || String(error), 2000);
+        seg.result = clip(error.message || String(error), toolClipDisplay);
         openaiMessages.push({ role: "tool", tool_call_id: call.id, content: seg.result });
       }
       emit("tool", { ...seg, status: seg.ok ? "done" : "error" });
