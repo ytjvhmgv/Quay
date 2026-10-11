@@ -136,10 +136,11 @@ export async function runAgent({ settings, store, project, chat, model, signal, 
       };
       segments.push(seg);
       emit("tool", { ...seg, status: "running" });
+      const onProgress = (msg) => emit("progress", { id: call.id, text: msg });
       try {
         if (parseError) throw new Error(parseError);
         if (!call.function.name) throw new Error("缺少工具名");
-        const output = await executeTool(store, project.id, call.function.name, args);
+        const output = await executeTool(store, project.id, call.function.name, args, onProgress);
         seg.result = clip(output, 2000);
         openaiMessages.push({ role: "tool", tool_call_id: call.id, content: clip(output, 12000) });
       } catch (error) {
