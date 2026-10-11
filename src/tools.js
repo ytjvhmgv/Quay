@@ -157,9 +157,10 @@ function matchGlob(name, glob) {
   return re.test(name) || re.test(name.split("/").pop());
 }
 
-async function listFiles(store, projectId, args) {
+async function listFiles(store, projectId, args, progress) {
   const rel = normalizeRel(args.path || "");
   const prefix = rel ? `${filesPrefix(projectId)}${rel}/` : filesPrefix(projectId);
+  progress(rel ? `列出目录 ${rel}/` : "列出根目录…");
   const { dirs, files } = await store.listLevel(prefix);
   const lines = [];
   for (const dir of dirs) {
@@ -175,9 +176,10 @@ async function listFiles(store, projectId, args) {
   return lines.join("\n");
 }
 
-async function readFileTool(store, projectId, args) {
+async function readFileTool(store, projectId, args, progress) {
   const rel = normalizeRel(args.path);
   if (!rel) throw new Error("path 不能为空");
+  progress(`读取 ${rel}…`);
   const got = await store.getBuffer(objectKey(projectId, rel));
   if (!got) throw new Error(`找不到文件：${rel}`);
   if (got.buffer.length > 1_500_000) throw new Error(`文件太大，不能整份读：${rel}`);
@@ -191,19 +193,20 @@ async function readFileTool(store, projectId, args) {
   return `文件 ${rel} · 第 ${offset}-${end} 行，共 ${lines.length} 行\n下面是原文，没有行号。\n\n${slice}`;
 }
 
-async function writeFileTool(store, projectId, args) {
+async function writeFileTool(store, projectId, args, progress) {
   const rel = normalizeRel(args.path);
   if (!rel) throw new Error("path 不能为空");
   const content = asText(args.content);
   if (content.length > 1_000_000) throw new Error("内容超过 100 万字符");
   const key = objectKey(projectId, rel);
   const existed = await store.head(key);
+  progress(`${existed ? "覆盖" : "写入"} ${rel}（${content.length} 字符）…`);
   await store.put(key, content, contentTypeFor(rel));
   await store.touch(projectId);
   return `${existed ? "已覆盖" : "已写入"} ${rel}（${content.length} 字符）`;
 }
 
-async function editFileTool(store, projectId, args) {
+async function editFileTool(store, projectId, args, progress) {
   const rel = normalizeRel(args.path);
   if (!rel) throw new Error("path 不能为空");
   const key = objectKey(projectId, rel);
@@ -211,6 +214,7 @@ async function editFileTool(store, projectId, args) {
   if (!got) throw new Error(`找不到文件：${rel}`);
   if (isProbablyBinary(rel, got.buffer)) throw new Error(`不能编辑二进制文件：${rel}`);
   const before = got.buffer.toString("utf8");
+  progress(`编辑 ${rel}…`);
   if (typeof args.old_string !== "string" || typeof args.new_string !== "string") {
     throw new Error("old_string 和 new_string 都必须是字符串");
   }
@@ -220,10 +224,11 @@ async function editFileTool(store, projectId, args) {
   return `已编辑 ${rel}\n${compactDiff(rel, before, after)}`;
 }
 
-async function deleteFileTool(store, projectId, args) {
+async function deleteFileTool(store, projectId, args, progress) {
   const rel = normalizeRel(args.path);
   if (!rel) throw new Error("path 不能为空");
   const key = objectKey(projectId, rel);
+  progress(`删除 ${rel}…`);
   if (await store.head(key)) {
     await store.del(key);
     await store.touch(projectId);
@@ -237,11 +242,12 @@ async function deleteFileTool(store, projectId, args) {
   return `已删除目录 ${rel}/（${kids.length} 个对象）`;
 }
 
-async function moveFileTool(store, projectId, args) {
+async function moveFileTool(store, projectId, args, progress) {
   const from = normalizeRel(args.from);
   const to = normalizeRel(args.to);
   if (!from || !to) throw new Error("from 和 to 不能为空");
   if (from === to) throw new Error("源路径和目标路径相同");
+  progress(`移动 ${from} → ${to}…`);
   const fromKey = objectKey(projectId, from);
   const toKey = objectKey(projectId, to);
   const file = await store.getBuffer(fromKey);
@@ -266,9 +272,10 @@ async function moveFileTool(store, projectId, args) {
   return `已移动目录 ${from}/ -> ${to}/（${kids.length} 个对象）`;
 }
 
-async function mkdirTool(store, projectId, args) {
+async function mkdirTool(store, projectId, args, progress) {
   const rel = normalizeRel(args.path);
   if (!rel) throw new Error("path 不能为空");
+  progress(`创建目录 ${rel}/…`);
   const prefix = `${filesPrefix(projectId)}${rel}/`;
   if ((await store.listAll(prefix)).length) return `目录已存在：${rel}/`;
   await store.put(`${prefix}.keep`, "", "text/plain; charset=utf-8");
@@ -276,7 +283,7 @@ async function mkdirTool(store, projectId, args) {
   return `已创建目录 ${rel}/`;
 }
 
-async function searchFiles(store, projectId, args) {
+async function searchFiles(store, projectId, args, progress) {
   const query = String(args.query || "");
   if (!query.trim()) throw new Error("query 不能为空");
   if (query.length > 200) throw new Error("query 太长");
@@ -307,6 +314,7 @@ async function searchFiles(store, projectId, args) {
       skipped += 1;
       continue;
     }
+    if (scanned % 10 === 0 && scanned > 0) progress(`已扫描 ${scanned} 个文件，找到 ${hits.length} 处匹配…`);
     const got = item.preset || await store.getBuffer(item.key);
     if (!got) continue;
     if (isProbablyBinary(fileRel, got.buffer)) continue;
@@ -325,16 +333,17 @@ async function searchFiles(store, projectId, args) {
   return `找到 ${hits.length} 处\n${hits.join("\n")}${tail}`;
 }
 
-export async function executeTool(store, projectId, name, args) {
+export async function executeTool(store, projectId, name, args, onProgress) {
+  const progress = typeof onProgress === 'function' ? onProgress : () => {};
   switch (name) {
-    case "list_files": return listFiles(store, projectId, args || {});
-    case "read_file": return readFileTool(store, projectId, args || {});
-    case "write_file": return writeFileTool(store, projectId, args || {});
-    case "edit_file": return editFileTool(store, projectId, args || {});
-    case "delete_file": return deleteFileTool(store, projectId, args || {});
-    case "move_file": return moveFileTool(store, projectId, args || {});
-    case "mkdir": return mkdirTool(store, projectId, args || {});
-    case "search_files": return searchFiles(store, projectId, args || {});
+    case "list_files": return listFiles(store, projectId, args || {}, progress);
+    case "read_file": return readFileTool(store, projectId, args || {}, progress);
+    case "write_file": return writeFileTool(store, projectId, args || {}, progress);
+    case "edit_file": return editFileTool(store, projectId, args || {}, progress);
+    case "delete_file": return deleteFileTool(store, projectId, args || {}, progress);
+    case "move_file": return moveFileTool(store, projectId, args || {}, progress);
+    case "mkdir": return mkdirTool(store, projectId, args || {}, progress);
+    case "search_files": return searchFiles(store, projectId, args || {}, progress);
     default: throw new Error(`没有这个工具：${name}`);
   }
 }
