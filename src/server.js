@@ -411,6 +411,7 @@ app.post("/api/projects/:id/chats/:chatId/messages", wrap(async (req, res) => {
     activeFile = "";
   }
   const model = String(req.body?.model || chat.model || settings.sub2apiModel || "").trim();
+  const reasoningEffort = String(req.body?.reasoningEffort || "").trim();
   if (!model) throw fail("还没有选择模型");
   if (!settings.sub2apiBaseUrl || !settings.sub2apiApiKey) throw fail("先配置 sub2api 地址和密钥");
 
@@ -419,6 +420,7 @@ app.post("/api/projects/:id/chats/:chatId/messages", wrap(async (req, res) => {
   chat.messages = chat.messages || [];
   chat.openaiMessages = chat.openaiMessages || [];
   chat.model = model;
+  if (reasoningEffort) chat.reasoningEffort = reasoningEffort;
   chat.updatedAt = now;
   if (!chat.title || chat.title === "新对话") chat.title = titleFrom(content);
   chat.messages.push({ role: "user", content, at: now });
@@ -457,6 +459,7 @@ app.post("/api/projects/:id/chats/:chatId/messages", wrap(async (req, res) => {
       signal: ac.signal,
       emit: send,
       activeFile,
+      reasoningEffort,
     });
     await saveAssistant(result.segments, result.openaiMessages);
     const changed = result.segments.some((seg) => seg.type === "tool" && seg.ok && MUTATING_TOOLS.has(seg.name));
