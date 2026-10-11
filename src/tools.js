@@ -133,6 +133,25 @@ export const TOOL_DEFS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "fetch_url",
+      description: "用 HTTP GET 或 POST 请求一个外部 URL，返回响应正文（文本）。只支持 http/https。响应过大时会截断到 50000 字符。",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          url: { type: "string", description: "完整 URL，必须以 http:// 或 https:// 开头。" },
+          method: { type: "string", enum: ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"], description: "HTTP 方法，默认 GET。" },
+          headers: { type: "object", description: "可选的请求头，键值对。", additionalProperties: { type: "string" } },
+          body: { type: "string", description: "可选的请求体，POST/PUT 时使用。" },
+          timeout: { type: "integer", description: "超时秒数，1-30，默认 15。" },
+        },
+        required: ["url"],
+      },
+    },
+  },
 ];
 
 export const MUTATING_TOOLS = new Set(["write_file", "edit_file", "delete_file", "move_file", "mkdir"]);
@@ -333,6 +352,69 @@ async function searchFiles(store, projectId, args, progress) {
   return `找到 ${hits.length} 处\n${hits.join("\n")}${tail}`;
 }
 
+const BLOCKED_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]);
+const BLOCKED_PREFIXES = ["10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.", "192.168.", "169.254."];
+
+function assertSafeUrl(rawUrl) {
+  let parsed;
+  try { parsed = new URL(rawUrl); } catch { throw new Error("URL 格式不合法"); }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("只支持 http/https 协议");
+  const host = parsed.hostname.toLowerCase();
+  if (BLOCKED_HOSTS.has(host)) throw new Error(`不允许访问内网地址：${host}`);
+  if (BLOCKED_PREFIXES.some((p) => host.startsWith(p))) throw new Error(`不允许访问内网地址：${host}`);
+  if (/^(10|172\.(1[6-9]|2\d|3[01])|192\.168)\./.test(host)) throw new Error(`不允许访问内网地址：${host}`);
+  return parsed.href;
+}
+
+function isBinaryContentType(ct) {
+  if (!ct) return false;
+  const lower = ct.toLowerCase();
+  return lower.startsWith("image/") || lower.startsWith("video/") || lower.startsWith("audio/")
+    || lower.includes("octet-stream") || lower.includes("zip") || lower.includes("pdf");
+}
+
+async function fetchUrl(args, progress) {
+  const safeUrl = assertSafeUrl(String(args.url || ""));
+  const method = (args.method || "GET").toUpperCase();
+  const timeoutSec = Math.min(30, Math.max(1, Number(args.timeout || 15)));
+  progress(`${method} ${safeUrl}…`);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutSec * 1000);
+  let response;
+  try {
+    const reqInit = {
+      method,
+      signal: ctrl.signal,
+      headers: {
+        "User-Agent": "Quay-Agent/1.0",
+        Accept: "text/html,application/json,text/plain,*/*;q=0.8",
+        ...(args.headers || {}),
+      },
+    };
+    if (args.body && ["POST", "PUT", "PATCH"].includes(method)) reqInit.body = String(args.body);
+    response = await fetch(safeUrl, reqInit);
+  } catch (error) {
+    if (error.name === "AbortError") throw new Error(`请求超时（${timeoutSec}s）：${safeUrl}`);
+    throw new Error(`网络错误：${error.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+  const ct = response.headers.get("content-type") || "";
+  const status = `${response.status} ${response.statusText}`;
+  if (isBinaryContentType(ct)) {
+    return `${status} | Content-Type: ${ct} | 二进制内容，无法显示。`;
+  }
+  const text = await response.text();
+  const MAX = 50000;
+  const body = text.length > MAX ? text.slice(0, MAX) + `\n…[已截断，共 ${text.length} 字符]` : text;
+  // strip excessive whitespace for HTML
+  const cleaned = ct.includes("html")
+    ? body.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s{3,}/g, "\n\n").trim()
+    : body;
+  return `HTTP ${status}\nContent-Type: ${ct}\nURL: ${safeUrl}\n\n${cleaned}`;
+}
+
+
 export async function executeTool(store, projectId, name, args, onProgress) {
   const progress = typeof onProgress === 'function' ? onProgress : () => {};
   switch (name) {
@@ -344,6 +426,7 @@ export async function executeTool(store, projectId, name, args, onProgress) {
     case "move_file": return moveFileTool(store, projectId, args || {}, progress);
     case "mkdir": return mkdirTool(store, projectId, args || {}, progress);
     case "search_files": return searchFiles(store, projectId, args || {}, progress);
+    case "fetch_url": return fetchUrl(args || {}, progress);
     default: throw new Error(`没有这个工具：${name}`);
   }
 }
