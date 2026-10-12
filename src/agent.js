@@ -51,6 +51,28 @@ function systemPrompt(project, activeFile) {
 - 可以用 fetch_url 访问外部网页或 API，但不能访问内网地址。${open}`;
 }
 
+function retryable(error) {
+  if (!error || error.aborted) return false;
+  const status = Number(error.status || 0);
+  if ([408, 409, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+  const text = `${error.message || ""} ${error.detail || ""}`;
+  return /timeout|timed out|ECONNRESET|ETIMEDOUT|fetch failed|network|upstream|No healthy|overloaded|temporarily/i.test(text);
+}
+
+function wait(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    const stop = () => {
+      clearTimeout(timer);
+      const error = new Error("已停止");
+      error.aborted = true;
+      reject(error);
+    };
+    if (signal?.aborted) stop();
+    else signal?.addEventListener("abort", stop, { once: true });
+  });
+}
+
 function aborted(partial) {
   const error = new Error("已停止");
   error.aborted = true;
@@ -79,33 +101,42 @@ export async function runAgent({ settings, store, project, chat, model, signal, 
     segments.push({ type: "text", text: textBuf });
     textBuf = "";
   };
-  const maxRounds = Math.min(64, Math.max(1, Number(process.env.AGENT_MAX_ROUNDS || 24)));
+  const maxRounds = Math.min(200, Math.max(1, Number(process.env.AGENT_MAX_ROUNDS || 80)));
   let usedToolRound = false;
 
   for (let round = 0; round < maxRounds; round += 1) {
     if (signal?.aborted) throw aborted({ segments, textBuf, openaiMessages });
     emit("status", { text: round === 0 ? "正在思考…" : "根据工具结果继续…" });
     let result;
-    try {
-      result = await completeChat({
-        baseUrl: settings.sub2apiBaseUrl,
-        apiKey: settings.sub2apiApiKey,
-        model,
-        reasoningEffort: reasoningEffort || "",
-        messages: compact([
-          { role: "system", content: systemPrompt(project, activeFile) },
-          ...openaiMessages,
-        ]),
-        tools: TOOL_DEFS,
-        signal,
-        onDelta: (text) => {
-          textBuf += text;
-          emit("delta", { text });
-        },
-      });
-    } catch (error) {
-      if (signal?.aborted || error?.aborted) throw aborted({ segments, textBuf, openaiMessages });
-      throw error;
+    const retries = Math.min(8, Math.max(0, Number(process.env.AGENT_RETRIES || 5)));
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      const deltaStart = textBuf.length;
+      try {
+        result = await completeChat({
+          baseUrl: settings.sub2apiBaseUrl,
+          apiKey: settings.sub2apiApiKey,
+          model,
+          reasoningEffort: reasoningEffort || "",
+          messages: compact([
+            { role: "system", content: systemPrompt(project, activeFile) },
+            ...openaiMessages,
+          ]),
+          tools: TOOL_DEFS,
+          signal,
+          onDelta: (text) => {
+            textBuf += text;
+            emit("delta", { text });
+          },
+        });
+        break;
+      } catch (error) {
+        if (signal?.aborted || error?.aborted) throw aborted({ segments, textBuf, openaiMessages });
+        textBuf = textBuf.slice(0, deltaStart);
+        if (attempt >= retries || !retryable(error)) throw error;
+        const delay = Math.min(20000, 1000 * (2 ** attempt));
+        emit("status", { text: `模型连接失败，${delay / 1000} 秒后自动重试（${attempt + 1}/${retries}）…` });
+        await wait(delay, signal);
+      }
     }
     if (signal?.aborted) throw aborted({ segments, textBuf, openaiMessages });
 
@@ -175,7 +206,7 @@ export async function runAgent({ settings, store, project, chat, model, signal, 
   }
 
   if (usedToolRound) {
-    textBuf += "这一轮工具调用已到上限。可以说「继续」，我会接着做。";
+    textBuf += "已连续完成多轮工具调用，但任务还没结束。直接发送「继续」，我会从当前进度接着做。";
     emit("delta", { text: textBuf });
     flushText();
     openaiMessages.push({ role: "assistant", content: "这一轮工具调用已到上限。" });
