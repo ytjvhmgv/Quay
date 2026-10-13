@@ -194,6 +194,15 @@
             <button id="new-folder" type="button" class="btn-ghost btn-icon" title="新建目录">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75ZM8.75 7.75a.75.75 0 0 0-1.5 0v1.5h-1.5a.75.75 0 0 0 0 1.5h1.5v1.5a.75.75 0 0 0 1.5 0v-1.5h1.5a.75.75 0 0 0 0-1.5h-1.5v-1.5Z"/></svg>
             </button>
+            <button id="rename-path" type="button" class="btn-ghost btn-icon" title="修改路径">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61Z"/></svg>
+            </button>
+            <button id="clone-repo" type="button" class="btn-ghost btn-icon" title="克隆 GitHub 仓库">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.49c-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.42 7.42 0 0 1 8 4.58c.68.003 1.36.092 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.19c0 .21.15.46.55.38A8.01 8.01 0 0 0 8 0Z"/></svg>
+            </button>
+            <button id="upload-folder" type="button" class="btn-ghost btn-icon" title="上传文件夹">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z"/></svg>
+            </button>
             <button id="upload-btn" type="button" class="btn-ghost btn-icon" title="上传文件">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8.75 1.018a.75.75 0 0 0-1.5 0V5.5H2.75a.75.75 0 0 0 0 1.5h4.5v8.25a.75.75 0 0 0 1.5 0V7h4.5a.75.75 0 0 0 0-1.5h-4.5V1.018Z"/><path d="M1.018 7.75a.75.75 0 0 0 0 1.5h13.964a.75.75 0 0 0 0-1.5H1.018Z" opacity=".4"/></svg>
             </button>
@@ -203,6 +212,7 @@
           </div>
         </div>
         <input id="upload-input" type="file" multiple hidden />
+        <input id="folder-input" type="file" webkitdirectory directory multiple hidden />
         <div id="tree" class="file-tree"></div>
         <section id="editor" class="editor hidden">
           <div class="editor-head">
