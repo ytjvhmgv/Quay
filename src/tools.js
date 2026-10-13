@@ -376,6 +376,23 @@ export const TOOL_DEFS = [
   {
     type: "function",
     function: {
+      name: "network_resources",
+      description: "打开一个网页并监听它加载的网络资源接口，返回脚本、样式、图片、接口请求的地址、方法和状态。适合查看页面调用了哪些资源。",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          url: { type: "string", description: "要打开的 http 或 https 页面。" },
+          filter: { type: "string", description: "可选，只保留地址里包含这段文字的资源。" },
+          timeout: { type: "integer", description: "等待秒数，5 到 25，默认 12。" },
+        },
+        required: ["url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "fetch_url",
       description: "用 HTTP GET 或 POST 请求一个外部 URL，返回响应正文（文本）。只支持 http/https。响应过大时会截断到 50000 字符。",
       parameters: {
@@ -1177,6 +1194,46 @@ ${langTable}`;
 }
 
 
+async function networkResources(args, progress) {
+  const pageUrl = assertSafeUrl(String(args.url || ""));
+  const filter = String(args.filter || "").toLowerCase();
+  const timeout = Math.min(25000, Math.max(5000, Number(args.timeout || 12) * 1000));
+  progress(`监听 ${pageUrl} 的网络资源…`);
+  let playwright;
+  try {
+    playwright = await import("playwright-core");
+  } catch {
+    throw new Error("服务器还没有安装浏览器监听组件");
+  }
+  let browser;
+  try {
+    browser = await playwright.chromium.launch({
+      headless: true,
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
+    });
+  } catch (error) {
+    throw new Error(`无法启动浏览器：${error.message}。部署时需要安装 Chromium，或设置 PLAYWRIGHT_CHROMIUM_PATH。`);
+  }
+  const resources = [];
+  try {
+    const page = await browser.newPage();
+    page.on("response", (response) => {
+      const url = response.url();
+      if (filter && !url.toLowerCase().includes(filter)) return;
+      if (resources.length >= 200) return;
+      resources.push(`${response.status()} ${response.request().resourceType()} ${response.request().method()} ${url}`);
+    });
+    await page.goto(pageUrl, { waitUntil: "networkidle", timeout });
+  } catch (error) {
+    if (!resources.length) throw new Error(`打开页面失败：${error.message}`);
+  } finally {
+    await browser.close();
+  }
+  if (!resources.length) return "没有监听到网络资源";
+  return `监听到 ${resources.length} 个资源\n${resources.join("\n")}`;
+}
+
+
 const BLOCKED_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]);
 const BLOCKED_PREFIXES = ["10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.", "192.168.", "169.254."];
 
@@ -1265,6 +1322,7 @@ export async function executeTool(store, projectId, name, args, onProgress) {
     case "dependency_graph": return dependencyGraph(store, projectId, args || {}, progress);
     case "duplicate_detect": return duplicateDetect(store, projectId, args || {}, progress);
     case "generate_file": return generateFile(store, projectId, args || {}, progress);
+    case "network_resources": return networkResources(args || {}, progress);
     case "fetch_url": return fetchUrl(args || {}, progress);
     default: throw new Error(`没有这个工具：${name}`);
   }
