@@ -901,21 +901,62 @@ $("#new-folder").addEventListener("click", async () => {
   await loadTree("");
   await loadTree(data.path.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, ""));
 });
-$("#upload-btn").addEventListener("click", () => $("#upload-input").click());
-$("#upload-input").addEventListener("change", async (event) => {
-  const files = [...event.target.files];
+async function uploadFiles(files, folder) {
+  if (!state.projectId || !files.length) return;
+  let done = 0;
   for (const file of files) {
-    await fetch(`/api/projects/${state.projectId}/raw?path=${encodeURIComponent(file.name)}`, {
+    const rel = folder ? (file.webkitRelativePath || file.name) : file.name;
+    const response = await fetch(`/api/projects/${state.projectId}/raw?path=${encodeURIComponent(rel)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/octet-stream" },
       body: file,
-    }).then(async (response) => {
-      if (!response.ok) throw new Error((await response.json()).error || "上传失败");
     });
+    if (!response.ok) throw new Error((await response.json()).error || "上传失败");
+    done += 1;
   }
-  event.target.value = "";
-  toast(`已上传 ${files.length} 个文件`);
+  toast(folder ? `已上传文件夹，共 ${done} 个文件` : `已上传 ${done} 个文件`);
   await loadTree("");
+}
+
+$("#rename-path").addEventListener("click", async () => {
+  if (!state.projectId || !state.file) return toast("先打开要改路径的文件");
+  const data = await askModal({
+    title: "修改文件路径",
+    html: `<label class="field"><span>新路径</span><input name="path" value="${escapeHtml(state.file.path)}" required /></label>`,
+    fields: ["path"],
+  });
+  if (!data?.path?.trim() || data.path.trim() === state.file.path) return;
+  await api(`/api/projects/${state.projectId}/move`, { method: "POST", body: { from: state.file.path, to: data.path.trim() } });
+  const next = data.path.trim();
+  closeFile();
+  await loadTree("");
+  await openFile(next);
+});
+$("#clone-repo").addEventListener("click", async () => {
+  if (!state.projectId) return toast("先选择项目");
+  const data = await askModal({
+    title: "克隆 GitHub 仓库",
+    html: '<label class="field"><span>仓库地址</span><input name="url" placeholder="https://github.com/用户/仓库.git" required /></label><label class="field"><span>分支，可留空</span><input name="branch" /></label>',
+    fields: ["url", "branch"],
+    okText: "克隆",
+  });
+  if (!data?.url?.trim()) return;
+  toast("正在克隆，大仓库会需要一点时间");
+  const result = await api(`/api/projects/${state.projectId}/clone`, { method: "POST", body: { url: data.url.trim(), branch: data.branch.trim() } });
+  toast(`已克隆 ${result.files} 个文件`);
+  await loadTree("");
+});
+$("#upload-folder").addEventListener("click", () => $("#folder-input").click());
+$("#folder-input").addEventListener("change", async (event) => {
+  const files = [...event.target.files];
+  event.target.value = "";
+  await uploadFiles(files, true);
+});
+$("#upload-btn").addEventListener("click", () => $("#upload-input").click());
+$("#upload-input").addEventListener("change", async (event) => {
+  const files = [...event.target.files];
+  event.target.value = "";
+  await uploadFiles(files, false);
 });
 $("#refresh-tree").addEventListener("click", async () => {
   const dirs = [...state.openDirs];
