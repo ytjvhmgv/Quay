@@ -1,10 +1,11 @@
-FROM node:22-alpine
+FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8080
 ENV DATA_DIR=/data
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
+RUN npx playwright install --with-deps chromium
 COPY src ./src
 COPY public ./public
 EXPOSE 8080
