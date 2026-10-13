@@ -310,6 +310,82 @@ app.put("/api/projects/:id/raw", express.raw({ limit: "30mb", type: () => true }
   res.json({ ok: true, path: rel, size: body.length });
 }));
 
+app.post("/api/projects/:id/move", wrap(async (req, res) => {
+  const id = pid(req);
+  const from = normalizeRel(req.body?.from || "");
+  const to = normalizeRel(req.body?.to || "");
+  if (!from || !to) throw fail("原路径和新路径都不能为空");
+  if (from === to) return res.json({ ok: true, path: to });
+  const store = getStore(getSettings());
+  const fromKey = objectKey(id, from);
+  const toKey = objectKey(id, to);
+  const file = await store.getBuffer(fromKey);
+  if (file) {
+    if (await store.head(toKey)) throw fail("目标路径已存在");
+    await store.put(toKey, file.buffer, file.contentType || contentTypeFor(to));
+    await store.del(fromKey);
+    await store.touch(id);
+    return res.json({ ok: true, path: to, moved: 1 });
+  }
+  const kids = await store.listAll(`${fromKey}/`);
+  if (!kids.length) throw fail("找不到文件或目录", 404);
+  if ((await store.listAll(`${toKey}/`)).length || await store.head(toKey)) throw fail("目标路径已存在");
+  for (const item of kids) {
+    const rest = item.key.slice(`${fromKey}/`.length);
+    const buf = await store.getBuffer(item.key);
+    if (!buf) continue;
+    await store.put(`${toKey}/${rest}`, buf.buffer, buf.contentType || "application/octet-stream");
+  }
+  await store.deleteKeys(kids.map((item) => item.key));
+  await store.touch(id);
+  res.json({ ok: true, path: to, moved: kids.length });
+}));
+
+app.post("/api/projects/:id/clone", wrap(async (req, res) => {
+  const id = pid(req);
+  const raw = String(req.body?.url || "").trim();
+  let parsed;
+  try { parsed = new URL(raw); } catch { throw fail("仓库地址不合法"); }
+  if (parsed.protocol !== "https:" || !/^(github\.com|www\.github\.com)$/i.test(parsed.hostname)) {
+    throw fail("目前只支持 https://github.com 的公开仓库");
+  }
+  const parts = parsed.pathname.replace(/\.git$/, "").split("/").filter(Boolean);
+  if (parts.length < 2) throw fail("仓库地址需要包含用户名和仓库名");
+  const owner = parts[0];
+  const repo = parts[1];
+  const dest = normalizeRel(req.body?.path || repo);
+  const branch = String(req.body?.branch || "").trim();
+  const store = getStore(getSettings());
+  const destKey = dest ? objectKey(id, dest) : filesPrefix(id).replace(/\/$/, "");
+  if (dest && ((await store.listAll(`${destKey}/`)).length || await store.head(destKey))) {
+    throw fail("目标目录已存在");
+  }
+  const zipUrl = branch
+    ? `https://codeload.github.com/${owner}/${repo}/zip/refs/heads/${encodeURIComponent(branch)}`
+    : `https://codeload.github.com/${owner}/${repo}/zip/refs/heads/HEAD`;
+  const response = await fetch(zipUrl, { headers: { "User-Agent": "Quay" }, redirect: "follow" });
+  if (!response.ok) throw fail(`GitHub 返回 ${response.status}。请确认仓库公开，或填写正确分支名。`, 502);
+  const archive = Buffer.from(await response.arrayBuffer());
+  if (archive.length > 40_000_000) throw fail("仓库压缩包超过 40MB");
+  const { default: unzipper } = await import("unzipper");
+  const directory = await unzipper.Open.buffer(archive);
+  let count = 0;
+  for (const entry of directory.files) {
+    if (entry.type !== "File") continue;
+    const pieces = entry.path.split("/").slice(1);
+    if (!pieces.length || pieces.some((part) => part === "..")) continue;
+    const rel = normalizeRel((dest ? `${dest}/` : "") + pieces.join("/"));
+    if (!rel || rel.split("/").includes(".git")) continue;
+    const content = await entry.buffer();
+    if (content.length > 8_000_000) continue;
+    await store.put(objectKey(id, rel), content, contentTypeFor(rel));
+    count += 1;
+    if (count >= 1500) break;
+  }
+  await store.touch(id);
+  res.json({ ok: true, path: dest, files: count });
+}));
+
 app.delete("/api/projects/:id/file", wrap(async (req, res) => {
   const id = pid(req);
   const rel = normalizeRel(req.query.path || "");
